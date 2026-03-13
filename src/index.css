@@ -1,0 +1,16 @@
+@import "tailwindcss";
+
+@keyframes breath {
+  0%, 100% { 
+    transform: scale(1); 
+    opacity: 0.3; 
+  }
+  50% { 
+    transform: scale(1.6); 
+    opacity: 0.7; 
+  }
+}
+
+.animate-breath {
+  animation: breath 3s ease-in-out infinite; /* Zmień 3s na 1s jeśli chcesz testować szybko */
+}
