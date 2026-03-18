@@ -103,7 +103,6 @@ function App() {
     setIsWaitingForConfirmation(false);
   };
 
-  // GŁÓWNA LOGIKA - NAPRAWIONA
   useEffect(() => {
     let interval = null;
     if (isActive && seconds > 0) {
@@ -128,7 +127,6 @@ function App() {
       }, 1000);
     } else if (seconds === 0 && isActive) {
       if (!isBreak) {
-        // Koniec pracy -> Czekamy na kliknięcie przerwy
         setIsActive(false);
         setIsWaitingForConfirmation(true);
         playSound();
@@ -136,10 +134,9 @@ function App() {
         setCurrentTask(newTask);
         triggerNotification("Czas na przerwę! 🌿", `Zadanie: ${newTask.text}`);
       } else {
-        // KONIEC PRZERWY -> AUTOMATYCZNY START PRACY
         setIsBreak(false);
         setSeconds(workTime);
-        setIsActive(true); // <--- TO NAPRAWIA TWÓJ PROBLEM
+        setIsActive(true); 
         playSound();
         triggerNotification("Przerwa zakończona", "Wracamy do pracy! Skupienie włączone.");
       }
@@ -168,9 +165,11 @@ function App() {
   const progress = (((isBreak ? breakTime : workTime) - seconds) / (isBreak ? breakTime : workTime)) * 100;
 
   return (
-    <div className={`min-h-screen max-h-screen flex flex-col items-center justify-center transition-all duration-1000 font-sans relative overflow-hidden ${isBreak ? 'bg-emerald-700 text-white' : 'bg-slate-950 text-slate-100'}`}>
+    // Użycie min-h-[100dvh] aby uniknąć problemów z paskiem adresu w przeglądarce mobilnej
+    <div className={`min-h-[100dvh] flex flex-col items-center justify-between py-6 px-6 transition-all duration-1000 font-sans relative overflow-hidden ${isBreak ? 'bg-emerald-700 text-white' : 'bg-slate-950 text-slate-100'}`}>
       
-      <div className="absolute top-8 right-8 flex gap-4 z-50">
+      {/* Ikony dźwięku i powiadomień - w górnym rogu */}
+      <div className="w-full max-w-4xl flex justify-end gap-2 z-50">
         <button onClick={() => setSoundEnabled(!soundEnabled)} className="p-3 hover:bg-white/10 rounded-full transition-all">
           {soundEnabled ? <Volume2 size={24} /> : <VolumeX size={24} className="opacity-50" />}
         </button>
@@ -179,91 +178,93 @@ function App() {
         </button>
       </div>
 
-      {!isActive && !isBreak && !isWaitingForConfirmation && (
-        <div className="absolute top-16 sm:top-24 left-1/2 -translate-x-1/2 w-full max-w-4xl px-4 sm:px-6 z-20 animate-in fade-in zoom-in duration-500">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            
-            <button onClick={() => setPreset(25 * 60, 4 * 60)} className="p-6 rounded-[2.5rem] bg-slate-900/40 backdrop-blur-xl border border-white/5 hover:border-emerald-500/50 transition-all text-left">
-              <div className="text-[10px] uppercase tracking-[0.2em] opacity-40 mb-2">Standard</div>
-              <div className="text-3xl font-light text-white">25 <span className="text-xs opacity-30">min</span></div>
-              <div className="mt-2 text-[9px] text-emerald-400/60 font-bold uppercase tracking-widest">Przerwa: 4m</div>
+      {/* Sekcja Presetów - nie używa już absolute, by nie nachodzić na timer */}
+      <div className="w-full max-w-4xl z-20 flex flex-col justify-center min-h-[140px]">
+        {!isActive && !isBreak && !isWaitingForConfirmation && (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 animate-in fade-in zoom-in duration-500">
+            <button onClick={() => setPreset(25 * 60, 4 * 60)} className="p-4 rounded-[2rem] bg-slate-900/40 backdrop-blur-xl border border-white/5 hover:border-emerald-500/50 transition-all text-left">
+              <div className="text-[9px] uppercase tracking-[0.2em] opacity-40 mb-1">Standard</div>
+              <div className="text-2xl font-light text-white">25 <span className="text-[10px] opacity-30">min</span></div>
+              <div className="mt-1 text-[8px] text-emerald-400 font-bold uppercase tracking-widest">Przerwa: 4m</div>
             </button>
 
-            <button onClick={() => setPreset(50 * 60, 7 * 60)} className="p-6 rounded-[2.5rem] bg-slate-900/40 backdrop-blur-xl border border-white/5 hover:border-emerald-500/50 transition-all text-left">
-              <div className="text-[10px] uppercase tracking-[0.2em] opacity-40 mb-2">Długi</div>
-              <div className="text-3xl font-light text-white">50 <span className="text-xs opacity-30">min</span></div>
-              <div className="mt-2 text-[9px] text-emerald-400/60 font-bold uppercase tracking-widest">Przerwa: 7m</div>
+            <button onClick={() => setPreset(50 * 60, 7 * 60)} className="p-4 rounded-[2rem] bg-slate-900/40 backdrop-blur-xl border border-white/5 hover:border-emerald-500/50 transition-all text-left">
+              <div className="text-[9px] uppercase tracking-[0.2em] opacity-40 mb-1">Długi</div>
+              <div className="text-2xl font-light text-white">50 <span className="text-[10px] opacity-30">min</span></div>
+              <div className="mt-1 text-[8px] text-emerald-400 font-bold uppercase tracking-widest">Przerwa: 7m</div>
             </button>
 
-            <div className="p-6 rounded-[2.5rem] bg-slate-900/60 backdrop-blur-xl border border-emerald-500/30 flex flex-col items-center justify-center relative">
-              <div className="text-[10px] uppercase tracking-[0.2em] text-emerald-400 font-bold mb-1">Własny</div>
+            <div className="p-4 rounded-[2rem] bg-slate-900/60 backdrop-blur-xl border border-emerald-500/30 flex flex-col items-center justify-center relative">
+              <div className="text-[9px] uppercase tracking-[0.2em] text-emerald-400 font-bold mb-1">Własny</div>
               <div className="flex items-baseline justify-center w-full">
                 <input 
                   type="number" inputMode="numeric" min="0" placeholder="0"
-                  className="bg-transparent w-full text-4xl font-light text-center outline-none text-white placeholder:opacity-20 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" 
+                  className="bg-transparent w-full text-3xl font-light text-center outline-none text-white placeholder:opacity-20 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" 
                   onChange={(e) => {
                     const val = Math.max(0, parseInt(e.target.value) || 0);
                     const breakMins = Math.max(1, Math.floor(val * 0.15));
                     setPreset(val * 60, breakMins * 60);
                   }} 
                 />
-                <span className="text-[10px] opacity-30 uppercase font-bold absolute right-8 bottom-10 sm:static sm:ml-1">min</span>
-              </div>
-              <div className="h-4 mt-1">
-                {workTime > 0 && (
-                  <div className="text-[9px] text-emerald-400 font-bold uppercase tracking-widest animate-in fade-in">
-                    Przerwa: {Math.floor(breakTime / 60)}m
-                  </div>
-                )}
+                <span className="text-[9px] opacity-30 uppercase font-bold ml-1">min</span>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
-      <div className="relative z-10 max-w-md w-full px-6 text-center mt-40 sm:mt-60">
+      {/* Główny Timer - używa flex-1 by wypełnić dostępną przestrzeń */}
+      <div className="flex-1 flex flex-col items-center justify-center w-full max-w-md text-center z-10 py-4">
         <h1 className="text-[10px] sm:text-xs tracking-[0.4em] uppercase mb-4 opacity-40 font-bold">
           {isBreak ? "Regeneracja" : "Głębokie Skupienie"}
         </h1>
-        <div className="text-7xl sm:text-9xl font-extralight tabular-nums tracking-tighter mb-4">
+        <div className="text-[18vw] sm:text-9xl font-extralight tabular-nums tracking-tighter leading-none mb-6">
           {Math.floor(seconds/60)}:{seconds%60 < 10 ? '0' : ''}{seconds%60}
         </div>
         
-        <div className="w-full h-1 bg-white/10 mb-12 rounded-full overflow-hidden">
+        <div className="w-full h-1 bg-white/10 mb-8 rounded-full overflow-hidden">
           <div className="h-full bg-emerald-400 transition-all duration-1000 ease-linear" style={{ width: `${progress}%` }}></div>
         </div>
 
         {isBreak && currentTask && (
-          <div className="bg-white/10 backdrop-blur-3xl border border-white/20 rounded-[2.5rem] p-8 mb-12 animate-in zoom-in">
-            <div className="text-6xl mb-4 leading-none">{currentTask.icon}</div>
-            <p className="text-xl font-medium text-white">{currentTask.text}</p>
+          <div className="bg-white/10 backdrop-blur-3xl border border-white/20 rounded-[2rem] p-6 mb-4 animate-in zoom-in w-full max-w-xs">
+            <div className="text-4xl mb-3 leading-none">{currentTask.icon}</div>
+            <p className="text-base font-medium text-white leading-tight">{currentTask.text}</p>
           </div>
         )}
+      </div>
 
-        <div className="flex flex-col gap-8 items-center">
-          <button onClick={() => setIsActive(!isActive)} className={`w-24 h-24 rounded-full flex items-center justify-center transition-all ${isActive ? 'bg-white/10 border border-white/20' : 'bg-white text-slate-900'}`}>
-            {isActive ? <Pause size={40} /> : <Play size={40} className="ml-2" />}
+      {/* Kontrolki i Statystyki na dole */}
+      <div className="w-full max-w-md flex flex-col items-center gap-6 z-10">
+        <div className="flex flex-col items-center gap-6">
+          <button onClick={() => setIsActive(!isActive)} className={`w-20 h-20 rounded-full flex items-center justify-center transition-all ${isActive ? 'bg-white/10 border border-white/20' : 'bg-white text-slate-900'}`}>
+            {isActive ? <Pause size={32} /> : <Play size={32} className="ml-1" />}
           </button>
-          <button onClick={() => {setIsActive(false); setSeconds(workTime); setIsBreak(false);}} className="text-[10px] opacity-30 hover:opacity-100 uppercase tracking-widest flex items-center gap-2"><RotateCcw size={14}/> Resetuj Sesję</button>
-          <div className="flex gap-2 bg-black/20 px-4 py-2 rounded-full min-h-[32px]">
+          
+          <button onClick={() => {setIsActive(false); setSeconds(workTime); setIsBreak(false);}} className="text-[10px] opacity-30 hover:opacity-100 uppercase tracking-widest flex items-center gap-2">
+            <RotateCcw size={14}/> Resetuj Sesję
+          </button>
+          
+          <div className="flex flex-wrap justify-center gap-2 min-h-[24px]">
             {[...Array(completedSessions)].map((_, i) => <Coffee key={i} size={16} className="text-emerald-400" />)}
           </div>
         </div>
 
-        <div className="mt-12 pt-8 border-t border-white/5 w-full grid grid-cols-2 opacity-40 text-center">
-          <div><div className="text-2xl font-light">{Math.floor(totalWorkMinutes)}</div><div className="text-[8px] uppercase">Minut Dziś</div></div>
-          <div><div className="text-2xl font-light">{completedSessions}</div><div className="text-[8px] uppercase">Sesje Dziś</div></div>
+        <div className="w-full grid grid-cols-2 opacity-40 text-center border-t border-white/5 pt-6">
+          <div><div className="text-xl font-light">{Math.floor(totalWorkMinutes)}</div><div className="text-[8px] uppercase">Minut Dziś</div></div>
+          <div><div className="text-xl font-light">{completedSessions}</div><div className="text-[8px] uppercase">Sesje Dziś</div></div>
         </div>
       </div>
 
+      {/* Modal Potwierdzenia - Full screen */}
       {isWaitingForConfirmation && (
-        <div className="fixed inset-0 z-[100] bg-slate-950/90 backdrop-blur-xl flex flex-col items-center justify-center p-6 text-center">
+        <div className="fixed inset-0 z-[100] bg-slate-950/95 backdrop-blur-xl flex flex-col items-center justify-center p-6 text-center">
           <div className="max-w-xs animate-in slide-in-from-bottom-8">
-            <h2 className="text-4xl font-bold mb-4 text-white">Czas na przerwę!</h2>
-            <button onClick={startBreak} className="w-full bg-emerald-500 py-6 rounded-2xl text-2xl font-bold transition-all hover:scale-105">Zacznij przerwę 🌿</button>
+            <h2 className="text-4xl font-bold mb-6 text-white leading-tight">Zasłużyłeś na przerwę!</h2>
+            <button onClick={startBreak} className="w-full bg-emerald-500 py-6 rounded-2xl text-xl font-bold transition-all active:scale-95">Zacznij przerwę 🌿</button>
             <button 
               onClick={() => { setSeconds(2 * 60); setIsActive(true); setIsWaitingForConfirmation(false); }}
-              className="mt-8 text-xs opacity-30 hover:opacity-100 uppercase tracking-[0.2em] transition-all hover:text-emerald-400"
+              className="mt-8 text-[10px] opacity-30 hover:opacity-100 uppercase tracking-[0.2em] transition-all"
             >
               Daj mi jeszcze 2 minuty ⏳
             </button>
