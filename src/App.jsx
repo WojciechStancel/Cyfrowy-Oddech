@@ -35,8 +35,8 @@ const BREAK_TASKS = [
 ];
 
 function App() {
-  const [workTime, setWorkTime] = useState(60 * 60); 
-  const [breakTime, setBreakTime] = useState(9 * 60); 
+  const [workTime, setWorkTime] = useState(1 * 2); 
+  const [breakTime, setBreakTime] = useState(1 * 4); 
   
   const [seconds, setSeconds] = useState(workTime);
   const [isActive, setIsActive] = useState(false);
@@ -47,7 +47,7 @@ function App() {
   const [isWaitingForConfirmation, setIsWaitingForConfirmation] = useState(false);
   
   const SOUND_URL = "/notification-sound.mp3"; 
-  const NOTIFICATION_SOUND_URL = "/break-end-sound.mp3"; // Nowy dźwięk ostrzegawczy
+  const NOTIFICATION_SOUND_URL = "/break-end-sound.mp3"; 
 
   const [soundEnabled, setSoundEnabled] = useState(() => {
     const saved = localStorage.getItem('soundEnabled');
@@ -59,17 +59,9 @@ function App() {
     return saved !== null ? JSON.parse(saved) : false;
   });
 
-  useEffect(() => {
-    localStorage.setItem('soundEnabled', JSON.stringify(soundEnabled));
-  }, [soundEnabled]);
-
-  useEffect(() => {
-    localStorage.setItem('notificationsEnabled', JSON.stringify(notificationsEnabled));
-  }, [notificationsEnabled]);
-
-  useEffect(() => {
-    localStorage.setItem('totalWorkMinutes', JSON.stringify(totalWorkMinutes));
-  }, [totalWorkMinutes]);
+  useEffect(() => { localStorage.setItem('soundEnabled', JSON.stringify(soundEnabled)); }, [soundEnabled]);
+  useEffect(() => { localStorage.setItem('notificationsEnabled', JSON.stringify(notificationsEnabled)); }, [notificationsEnabled]);
+  useEffect(() => { localStorage.setItem('totalWorkMinutes', JSON.stringify(totalWorkMinutes)); }, [totalWorkMinutes]);
 
   useEffect(() => {
     document.title = isActive 
@@ -77,12 +69,17 @@ function App() {
       : 'Cyfrowy Oddech';
   }, [seconds, isActive, isBreak]);
 
-  // Ulepszona funkcja dźwięku obsługująca różne pliki
   const playSound = (url = SOUND_URL, vol = 0.4) => {
     if (soundEnabled) {
       const audio = new Audio(url);
       audio.volume = vol;
       audio.play().catch(() => {});
+    }
+  };
+
+  const triggerNotification = (title, body) => {
+    if (notificationsEnabled && Notification.permission === "granted") {
+      new Notification(title, { body, icon: "/favicon.svg", silent: true });
     }
   };
 
@@ -106,36 +103,49 @@ function App() {
     setIsWaitingForConfirmation(false);
   };
 
+  // GŁÓWNA LOGIKA - NAPRAWIONA
   useEffect(() => {
     let interval = null;
     if (isActive && seconds > 0) {
+      const startTime = Date.now();
+      const startSeconds = seconds;
+
       interval = setInterval(() => {
-        setSeconds(s => {
-          // Zmiana: używamy notification-sound.mp3 przed końcem przerwy
-          if (isBreak && s === 3) playSound(NOTIFICATION_SOUND_URL, 0.3); 
-          return s - 1;
-        });
-        if (!isBreak) setTotalWorkMinutes(prev => prev + (1/60));
-      }, 1000);
-    } else if (seconds === 0) {
-      if (!isBreak) {
-        if (!isWaitingForConfirmation) {
-          setIsActive(false);
-          setIsWaitingForConfirmation(true);
-          playSound();
-          const newTask = BREAK_TASKS[Math.floor(Math.random() * BREAK_TASKS.length)];
-          setCurrentTask(newTask);
-          triggerNotification("Czas na przerwę! 🌿", `Zadanie dla Ciebie: ${newTask.text}`);
+        const now = Date.now();
+        const elapsed = Math.floor((now - startTime) / 1000);
+        const newSeconds = Math.max(0, startSeconds - elapsed);
+
+        if (isBreak && newSeconds === 3 && seconds > 3) {
+          playSound(NOTIFICATION_SOUND_URL, 0.3);
         }
+
+        if (!isBreak) {
+            const delta = seconds - newSeconds;
+            if (delta > 0) setTotalWorkMinutes(prev => prev + (delta / 60));
+        }
+        
+        setSeconds(newSeconds);
+      }, 1000);
+    } else if (seconds === 0 && isActive) {
+      if (!isBreak) {
+        // Koniec pracy -> Czekamy na kliknięcie przerwy
+        setIsActive(false);
+        setIsWaitingForConfirmation(true);
+        playSound();
+        const newTask = BREAK_TASKS[Math.floor(Math.random() * BREAK_TASKS.length)];
+        setCurrentTask(newTask);
+        triggerNotification("Czas na przerwę! 🌿", `Zadanie: ${newTask.text}`);
       } else {
+        // KONIEC PRZERWY -> AUTOMATYCZNY START PRACY
         setIsBreak(false);
         setSeconds(workTime);
+        setIsActive(true); // <--- TO NAPRAWIA TWÓJ PROBLEM
         playSound();
         triggerNotification("Przerwa zakończona", "Wracamy do pracy! Skupienie włączone.");
       }
     }
     return () => clearInterval(interval);
-  }, [isActive, seconds, isBreak, workTime, isWaitingForConfirmation]);
+  }, [isActive, isBreak, workTime, seconds === 0]);
 
   useEffect(() => {
     let reminder = null;
@@ -157,12 +167,6 @@ function App() {
 
   const progress = (((isBreak ? breakTime : workTime) - seconds) / (isBreak ? breakTime : workTime)) * 100;
 
-  const triggerNotification = (title, body) => {
-    if (notificationsEnabled && Notification.permission === "granted") {
-      new Notification(title, { body, icon: "/vite.svg", silent: true });
-    }
-  };
-
   return (
     <div className={`min-h-screen max-h-screen flex flex-col items-center justify-center transition-all duration-1000 font-sans relative overflow-hidden ${isBreak ? 'bg-emerald-700 text-white' : 'bg-slate-950 text-slate-100'}`}>
       
@@ -179,13 +183,13 @@ function App() {
         <div className="absolute top-16 sm:top-24 left-1/2 -translate-x-1/2 w-full max-w-4xl px-4 sm:px-6 z-20 animate-in fade-in zoom-in duration-500">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             
-            <button onClick={() => setPreset(25 * 60, 4 * 60)} className="p-6 rounded-[2.5rem] bg-slate-900/40 backdrop-blur-xl border border-white/5 hover:border-emerald-500/50 transition-all">
+            <button onClick={() => setPreset(25 * 60, 4 * 60)} className="p-6 rounded-[2.5rem] bg-slate-900/40 backdrop-blur-xl border border-white/5 hover:border-emerald-500/50 transition-all text-left">
               <div className="text-[10px] uppercase tracking-[0.2em] opacity-40 mb-2">Standard</div>
               <div className="text-3xl font-light text-white">25 <span className="text-xs opacity-30">min</span></div>
               <div className="mt-2 text-[9px] text-emerald-400/60 font-bold uppercase tracking-widest">Przerwa: 4m</div>
             </button>
 
-            <button onClick={() => setPreset(50 * 60, 7 * 60)} className="p-6 rounded-[2.5rem] bg-slate-900/40 backdrop-blur-xl border border-white/5 hover:border-emerald-500/50 transition-all">
+            <button onClick={() => setPreset(50 * 60, 7 * 60)} className="p-6 rounded-[2.5rem] bg-slate-900/40 backdrop-blur-xl border border-white/5 hover:border-emerald-500/50 transition-all text-left">
               <div className="text-[10px] uppercase tracking-[0.2em] opacity-40 mb-2">Długi</div>
               <div className="text-3xl font-light text-white">50 <span className="text-xs opacity-30">min</span></div>
               <div className="mt-2 text-[9px] text-emerald-400/60 font-bold uppercase tracking-widest">Przerwa: 7m</div>
@@ -195,10 +199,7 @@ function App() {
               <div className="text-[10px] uppercase tracking-[0.2em] text-emerald-400 font-bold mb-1">Własny</div>
               <div className="flex items-baseline justify-center w-full">
                 <input 
-                  type="number" 
-                  inputMode="numeric"
-                  min="0"
-                  placeholder="0"
+                  type="number" inputMode="numeric" min="0" placeholder="0"
                   className="bg-transparent w-full text-4xl font-light text-center outline-none text-white placeholder:opacity-20 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" 
                   onChange={(e) => {
                     const val = Math.max(0, parseInt(e.target.value) || 0);
@@ -216,7 +217,6 @@ function App() {
                 )}
               </div>
             </div>
-
           </div>
         </div>
       )}
@@ -245,7 +245,7 @@ function App() {
             {isActive ? <Pause size={40} /> : <Play size={40} className="ml-2" />}
           </button>
           <button onClick={() => {setIsActive(false); setSeconds(workTime); setIsBreak(false);}} className="text-[10px] opacity-30 hover:opacity-100 uppercase tracking-widest flex items-center gap-2"><RotateCcw size={14}/> Resetuj Sesję</button>
-          <div className="flex gap-2 bg-black/20 px-4 py-2 rounded-full">
+          <div className="flex gap-2 bg-black/20 px-4 py-2 rounded-full min-h-[32px]">
             {[...Array(completedSessions)].map((_, i) => <Coffee key={i} size={16} className="text-emerald-400" />)}
           </div>
         </div>
