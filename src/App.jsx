@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Play, Pause, RotateCcw, Bell, BellOff, Volume2, VolumeX, Coffee } from 'lucide-react';
 
 const BREAK_TASKS = [
@@ -34,68 +34,167 @@ const BREAK_TASKS = [
   { text: "Zrób kilka kroków boso po podłodze.", icon: "👣" },
 ];
 
+const SOUND_URL = "/notification-sound.mp3";
+const NOTIFICATION_SOUND_URL = "/break-end-sound.mp3";
+
 function App() {
-  const [workTime, setWorkTime] = useState(1 * 2); 
-  const [breakTime, setBreakTime] = useState(1 * 4); 
-  
+  const [workTime, setWorkTime] = useState(1 * 5);
+  const [breakTime, setBreakTime] = useState(1 * 6);
+
   const [seconds, setSeconds] = useState(workTime);
   const [isActive, setIsActive] = useState(false);
   const [isBreak, setIsBreak] = useState(false);
   const [currentTask, setCurrentTask] = useState(null);
   const [completedSessions, setCompletedSessions] = useState(0);
-  const [totalWorkMinutes, setTotalWorkMinutes] = useState(() => JSON.parse(localStorage.getItem('totalWorkMinutes')) || 0);
   const [isWaitingForConfirmation, setIsWaitingForConfirmation] = useState(false);
-  
-  const SOUND_URL = "/notification-sound.mp3"; 
-  const NOTIFICATION_SOUND_URL = "/break-end-sound.mp3"; 
 
+  const [totalWorkMinutes, setTotalWorkMinutes] = useState(() => JSON.parse(localStorage.getItem('totalWorkMinutes')) || 0);
   const [soundEnabled, setSoundEnabled] = useState(() => {
     const saved = localStorage.getItem('soundEnabled');
     return saved !== null ? JSON.parse(saved) : true;
   });
-
   const [notificationsEnabled, setNotificationsEnabled] = useState(() => {
     const saved = localStorage.getItem('notificationsEnabled');
     return saved !== null ? JSON.parse(saved) : false;
   });
 
-  useEffect(() => { localStorage.setItem('soundEnabled', JSON.stringify(soundEnabled)); }, [soundEnabled]);
-  useEffect(() => { localStorage.setItem('notificationsEnabled', JSON.stringify(notificationsEnabled)); }, [notificationsEnabled]);
-  useEffect(() => { localStorage.setItem('totalWorkMinutes', JSON.stringify(totalWorkMinutes)); }, [totalWorkMinutes]);
+  const timerEndRef = useRef(null);
+  const intervalRef = useRef(null);
+  const reminderRef = useRef(null);
+  const unlockedRef = useRef(false);
+  const lastWholeSecondRef = useRef(null);
+
+  const mainAudioRef = useRef(null);
+  const breakEndAudioRef = useRef(null);
 
   useEffect(() => {
-    document.title = isActive 
-      ? `${Math.floor(seconds/60)}:${seconds%60 < 10 ? '0' : ''}${seconds%60} - ${isBreak ? 'Przerwa' : 'Praca'}`
+    localStorage.setItem('soundEnabled', JSON.stringify(soundEnabled));
+  }, [soundEnabled]);
+
+  useEffect(() => {
+    localStorage.setItem('notificationsEnabled', JSON.stringify(notificationsEnabled));
+  }, [notificationsEnabled]);
+
+  useEffect(() => {
+    localStorage.setItem('totalWorkMinutes', JSON.stringify(totalWorkMinutes));
+  }, [totalWorkMinutes]);
+
+  useEffect(() => {
+    document.title = isActive
+      ? `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')} - ${isBreak ? 'Przerwa' : 'Praca'}`
       : 'Cyfrowy Oddech';
   }, [seconds, isActive, isBreak]);
 
-  const playSound = (url = SOUND_URL, vol = 0.4) => {
-    if (soundEnabled) {
-      const audio = new Audio(url);
+  const unlockAudio = useCallback(async () => {
+    try {
+      if (!mainAudioRef.current) {
+        mainAudioRef.current = new Audio(SOUND_URL);
+        mainAudioRef.current.preload = 'auto';
+      }
+      if (!breakEndAudioRef.current) {
+        breakEndAudioRef.current = new Audio(NOTIFICATION_SOUND_URL);
+        breakEndAudioRef.current.preload = 'auto';
+      }
+
+      // "Dotyk" audio po geście użytkownika
+      mainAudioRef.current.muted = true;
+      await mainAudioRef.current.play();
+      mainAudioRef.current.pause();
+      mainAudioRef.current.currentTime = 0;
+      mainAudioRef.current.muted = false;
+
+      unlockedRef.current = true;
+    } catch (e) {
+      console.warn('Audio unlock failed:', e);
+    }
+  }, []);
+
+  const playSound = useCallback(async (type = 'main', vol = 0.4) => {
+    if (!soundEnabled) return;
+
+    try {
+      const audio = type === 'breakEnd' ? breakEndAudioRef.current : mainAudioRef.current;
+      if (!audio) return;
+
+      audio.pause();
+      audio.currentTime = 0;
       audio.volume = vol;
-      audio.play().catch(() => {});
+      await audio.play();
+    } catch (e) {
+      console.warn('Audio play blocked/failed:', e);
     }
-  };
+  }, [soundEnabled]);
 
-  const triggerNotification = (title, body) => {
-    if (notificationsEnabled && Notification.permission === "granted") {
-      new Notification(title, { body, icon: "/favicon.svg", silent: true });
-    }
-  };
+  const triggerNotification = useCallback(async (title, body) => {
+    if (!notificationsEnabled) return;
+    if (!('Notification' in window)) return;
+    if (Notification.permission !== 'granted') return;
 
-  const toggleNotifications = () => {
-    if (!notificationsEnabled) {
-      Notification.requestPermission().then(p => {
-        if (p === "granted") setNotificationsEnabled(true);
+    try {
+      if ('serviceWorker' in navigator) {
+        const reg = await navigator.serviceWorker.getRegistration();
+        if (reg) {
+          await reg.showNotification(title, {
+            body,
+            icon: '/favicon.svg',
+            badge: '/favicon.svg',
+            tag: 'cyfrowy-oddech',
+            renotify: true,
+            requireInteraction: true,
+            silent: true,
+          });
+          return;
+        }
+      }
+
+      new Notification(title, {
+        body,
+        icon: '/favicon.svg',
+        silent: true,
       });
-    } else {
-      setNotificationsEnabled(false);
+    } catch (e) {
+      console.warn('Notification failed:', e);
     }
-  };
+  }, [notificationsEnabled]);
+
+  const finishWork = useCallback(async () => {
+    setIsActive(false);
+    setIsWaitingForConfirmation(true);
+
+    const newTask = BREAK_TASKS[Math.floor(Math.random() * BREAK_TASKS.length)];
+    setCurrentTask(newTask);
+
+    await playSound('main', 0.5);
+    await triggerNotification("Czas na przerwę! 🌿", `Zadanie: ${newTask.text}`);
+  }, [playSound, triggerNotification]);
+
+  const finishBreak = useCallback(async () => {
+    setIsBreak(false);
+    setSeconds(workTime);
+    setIsActive(true);
+    timerEndRef.current = Date.now() + workTime * 1000;
+    lastWholeSecondRef.current = workTime;
+
+    await playSound('main', 0.5);
+    await triggerNotification("Przerwa zakończona", "Wracamy do pracy! Skupienie włączone.");
+  }, [playSound, triggerNotification, workTime]);
+
+  const startTimer = useCallback((durationInSeconds) => {
+    timerEndRef.current = Date.now() + durationInSeconds * 1000;
+    lastWholeSecondRef.current = durationInSeconds;
+    setSeconds(durationInSeconds);
+    setIsActive(true);
+  }, []);
+
+  const stopTimer = useCallback(() => {
+    setIsActive(false);
+    timerEndRef.current = null;
+    lastWholeSecondRef.current = null;
+  }, []);
 
   const setPreset = (w, b) => {
     if (!w || w <= 0) return;
-    setIsActive(false);
+    stopTimer();
     setWorkTime(w);
     setBreakTime(b);
     setSeconds(w);
@@ -103,72 +202,115 @@ function App() {
     setIsWaitingForConfirmation(false);
   };
 
-  useEffect(() => {
-    let interval = null;
-    if (isActive && seconds > 0) {
-      const startTime = Date.now();
-      const startSeconds = seconds;
-
-      interval = setInterval(() => {
-        const now = Date.now();
-        const elapsed = Math.floor((now - startTime) / 1000);
-        const newSeconds = Math.max(0, startSeconds - elapsed);
-
-        if (isBreak && newSeconds === 3 && seconds > 3) {
-          playSound(NOTIFICATION_SOUND_URL, 0.3);
-        }
-
-        if (!isBreak) {
-            const delta = seconds - newSeconds;
-            if (delta > 0) setTotalWorkMinutes(prev => prev + (delta / 60));
-        }
-        
-        setSeconds(newSeconds);
-      }, 1000);
-    } else if (seconds === 0 && isActive) {
-      if (!isBreak) {
-        setIsActive(false);
-        setIsWaitingForConfirmation(true);
-        playSound();
-        const newTask = BREAK_TASKS[Math.floor(Math.random() * BREAK_TASKS.length)];
-        setCurrentTask(newTask);
-        triggerNotification("Czas na przerwę! 🌿", `Zadanie: ${newTask.text}`);
-      } else {
-        setIsBreak(false);
-        setSeconds(workTime);
-        setIsActive(true); 
-        playSound();
-        triggerNotification("Przerwa zakończona", "Wracamy do pracy! Skupienie włączone.");
-      }
-    }
-    return () => clearInterval(interval);
-  }, [isActive, isBreak, workTime, seconds === 0]);
-
-  useEffect(() => {
-    let reminder = null;
-    if (isWaitingForConfirmation) {
-      reminder = setInterval(() => {
-        if (soundEnabled) playSound(SOUND_URL, 0.2); 
-      }, 5000);
-    }
-    return () => clearInterval(reminder);
-  }, [isWaitingForConfirmation, soundEnabled]);
-
-  const startBreak = () => {
+  const startBreak = async () => {
     setIsWaitingForConfirmation(false);
     setIsBreak(true);
-    setSeconds(breakTime);
     setCompletedSessions(prev => prev + 1);
-    setIsActive(true);
+    startTimer(breakTime);
+  };
+
+  useEffect(() => {
+    if (!isActive || !timerEndRef.current) {
+      clearInterval(intervalRef.current);
+      return;
+    }
+
+    clearInterval(intervalRef.current);
+
+    intervalRef.current = setInterval(async () => {
+      const remaining = Math.max(0, Math.ceil((timerEndRef.current - Date.now()) / 1000));
+      const prev = lastWholeSecondRef.current;
+
+      setSeconds(remaining);
+
+      if (!isBreak && typeof prev === 'number' && prev > remaining) {
+        setTotalWorkMinutes(current => current + (prev - remaining) / 60);
+      }
+
+      if (isBreak && prev > 3 && remaining <= 3 && remaining > 0) {
+        await playSound('breakEnd', 0.3);
+      }
+
+      lastWholeSecondRef.current = remaining;
+
+      if (remaining === 0) {
+        clearInterval(intervalRef.current);
+        timerEndRef.current = null;
+
+        if (isBreak) {
+          await finishBreak();
+        } else {
+          await finishWork();
+        }
+      }
+    }, 250);
+
+    return () => clearInterval(intervalRef.current);
+  }, [isActive, isBreak, finishBreak, finishWork, playSound]);
+
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (!document.hidden && isActive && timerEndRef.current) {
+        const remaining = Math.max(0, Math.ceil((timerEndRef.current - Date.now()) / 1000));
+        setSeconds(remaining);
+      }
+    };
+
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, [isActive]);
+
+  useEffect(() => {
+    clearInterval(reminderRef.current);
+
+    if (isWaitingForConfirmation) {
+      reminderRef.current = setInterval(() => {
+        playSound('main', 0.2);
+      }, 5000);
+    }
+
+    return () => clearInterval(reminderRef.current);
+  }, [isWaitingForConfirmation, playSound]);
+
+  const toggleNotifications = async () => {
+    if (!('Notification' in window)) {
+      alert('Ta przeglądarka nie wspiera powiadomień.');
+      return;
+    }
+
+    if (!notificationsEnabled) {
+      try {
+        const permission = await Notification.requestPermission();
+        if (permission === 'granted') setNotificationsEnabled(true);
+      } catch (e) {
+        console.warn('Permission request failed:', e);
+      }
+    } else {
+      setNotificationsEnabled(false);
+    }
+  };
+
+  const handleStartPause = async () => {
+    await unlockAudio();
+
+    if (isActive) {
+      stopTimer();
+    } else {
+      startTimer(seconds);
+    }
+  };
+
+  const handleReset = () => {
+    stopTimer();
+    setSeconds(workTime);
+    setIsBreak(false);
+    setIsWaitingForConfirmation(false);
   };
 
   const progress = (((isBreak ? breakTime : workTime) - seconds) / (isBreak ? breakTime : workTime)) * 100;
 
   return (
-    // Użycie min-h-[100dvh] aby uniknąć problemów z paskiem adresu w przeglądarce mobilnej
     <div className={`min-h-[100dvh] flex flex-col items-center justify-between py-6 px-6 transition-all duration-1000 font-sans relative overflow-hidden ${isBreak ? 'bg-emerald-700 text-white' : 'bg-slate-950 text-slate-100'}`}>
-      
-      {/* Ikony dźwięku i powiadomień - w górnym rogu */}
       <div className="w-full max-w-4xl flex justify-end gap-2 z-50">
         <button onClick={() => setSoundEnabled(!soundEnabled)} className="p-3 hover:bg-white/10 rounded-full transition-all">
           {soundEnabled ? <Volume2 size={24} /> : <VolumeX size={24} className="opacity-50" />}
@@ -178,7 +320,6 @@ function App() {
         </button>
       </div>
 
-      {/* Sekcja Presetów - nie używa już absolute, by nie nachodzić na timer */}
       <div className="w-full max-w-4xl z-20 flex flex-col justify-center min-h-[140px]">
         {!isActive && !isBreak && !isWaitingForConfirmation && (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 animate-in fade-in zoom-in duration-500">
@@ -197,14 +338,17 @@ function App() {
             <div className="p-4 rounded-[2rem] bg-slate-900/60 backdrop-blur-xl border border-emerald-500/30 flex flex-col items-center justify-center relative">
               <div className="text-[9px] uppercase tracking-[0.2em] text-emerald-400 font-bold mb-1">Własny</div>
               <div className="flex items-baseline justify-center w-full">
-                <input 
-                  type="number" inputMode="numeric" min="0" placeholder="0"
-                  className="bg-transparent w-full text-3xl font-light text-center outline-none text-white placeholder:opacity-20 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" 
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min="0"
+                  placeholder="0"
+                  className="bg-transparent w-full text-3xl font-light text-center outline-none text-white placeholder:opacity-20 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   onChange={(e) => {
                     const val = Math.max(0, parseInt(e.target.value) || 0);
                     const breakMins = Math.max(1, Math.floor(val * 0.15));
                     setPreset(val * 60, breakMins * 60);
-                  }} 
+                  }}
                 />
                 <span className="text-[9px] opacity-30 uppercase font-bold ml-1">min</span>
               </div>
@@ -213,17 +357,17 @@ function App() {
         )}
       </div>
 
-      {/* Główny Timer - używa flex-1 by wypełnić dostępną przestrzeń */}
       <div className="flex-1 flex flex-col items-center justify-center w-full max-w-md text-center z-10 py-4">
         <h1 className="text-[10px] sm:text-xs tracking-[0.4em] uppercase mb-4 opacity-40 font-bold">
           {isBreak ? "Regeneracja" : "Głębokie Skupienie"}
         </h1>
+
         <div className="text-[18vw] sm:text-9xl font-extralight tabular-nums tracking-tighter leading-none mb-6">
-          {Math.floor(seconds/60)}:{seconds%60 < 10 ? '0' : ''}{seconds%60}
+          {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, '0')}
         </div>
-        
+
         <div className="w-full h-1 bg-white/10 mb-8 rounded-full overflow-hidden">
-          <div className="h-full bg-emerald-400 transition-all duration-1000 ease-linear" style={{ width: `${progress}%` }}></div>
+          <div className="h-full bg-emerald-400 transition-all duration-300 ease-linear" style={{ width: `${progress}%` }} />
         </div>
 
         {isBreak && currentTask && (
@@ -234,36 +378,45 @@ function App() {
         )}
       </div>
 
-      {/* Kontrolki i Statystyki na dole */}
       <div className="w-full max-w-md flex flex-col items-center gap-6 z-10">
         <div className="flex flex-col items-center gap-6">
-          <button onClick={() => setIsActive(!isActive)} className={`w-20 h-20 rounded-full flex items-center justify-center transition-all ${isActive ? 'bg-white/10 border border-white/20' : 'bg-white text-slate-900'}`}>
+          <button onClick={handleStartPause} className={`w-20 h-20 rounded-full flex items-center justify-center transition-all ${isActive ? 'bg-white/10 border border-white/20' : 'bg-white text-slate-900'}`}>
             {isActive ? <Pause size={32} /> : <Play size={32} className="ml-1" />}
           </button>
-          
-          <button onClick={() => {setIsActive(false); setSeconds(workTime); setIsBreak(false);}} className="text-[10px] opacity-30 hover:opacity-100 uppercase tracking-widest flex items-center gap-2">
-            <RotateCcw size={14}/> Resetuj Sesję
+
+          <button onClick={handleReset} className="text-[10px] opacity-30 hover:opacity-100 uppercase tracking-widest flex items-center gap-2">
+            <RotateCcw size={14} /> Resetuj Sesję
           </button>
-          
+
           <div className="flex flex-wrap justify-center gap-2 min-h-[24px]">
             {[...Array(completedSessions)].map((_, i) => <Coffee key={i} size={16} className="text-emerald-400" />)}
           </div>
         </div>
 
         <div className="w-full grid grid-cols-2 opacity-40 text-center border-t border-white/5 pt-6">
-          <div><div className="text-xl font-light">{Math.floor(totalWorkMinutes)}</div><div className="text-[8px] uppercase">Minut Dziś</div></div>
-          <div><div className="text-xl font-light">{completedSessions}</div><div className="text-[8px] uppercase">Sesje Dziś</div></div>
+          <div>
+            <div className="text-xl font-light">{Math.floor(totalWorkMinutes)}</div>
+            <div className="text-[8px] uppercase">Minut Dziś</div>
+          </div>
+          <div>
+            <div className="text-xl font-light">{completedSessions}</div>
+            <div className="text-[8px] uppercase">Sesje Dziś</div>
+          </div>
         </div>
       </div>
 
-      {/* Modal Potwierdzenia - Full screen */}
       {isWaitingForConfirmation && (
         <div className="fixed inset-0 z-[100] bg-slate-950/95 backdrop-blur-xl flex flex-col items-center justify-center p-6 text-center">
           <div className="max-w-xs animate-in slide-in-from-bottom-8">
             <h2 className="text-4xl font-bold mb-6 text-white leading-tight">Zasłużyłeś na przerwę!</h2>
-            <button onClick={startBreak} className="w-full bg-emerald-500 py-6 rounded-2xl text-xl font-bold transition-all active:scale-95">Zacznij przerwę 🌿</button>
-            <button 
-              onClick={() => { setSeconds(2 * 60); setIsActive(true); setIsWaitingForConfirmation(false); }}
+            <button onClick={startBreak} className="w-full bg-emerald-500 py-6 rounded-2xl text-xl font-bold transition-all active:scale-95">
+              Zacznij przerwę 🌿
+            </button>
+            <button
+              onClick={() => {
+                setIsWaitingForConfirmation(false);
+                startTimer(2 * 60);
+              }}
               className="mt-8 text-[10px] opacity-30 hover:opacity-100 uppercase tracking-[0.2em] transition-all"
             >
               Daj mi jeszcze 2 minuty ⏳
