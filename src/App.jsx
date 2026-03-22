@@ -84,11 +84,11 @@ function App() {
     localStorage.setItem('totalWorkSeconds', JSON.stringify(totalWorkSeconds));
   }, [totalWorkSeconds]);
 
-  useEffect(() => {
-    document.title = isActive
-      ? `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')} - ${isBreak ? 'Przerwa' : 'Praca'}`
-      : 'Cyfrowy Oddech';
-  }, [seconds, isActive, isBreak]);
+useEffect(() => {
+  document.title = isActive
+    ? `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')} – ${isBreak ? 'Przerwa' : 'Praca'} | Cyfrowy Oddech`
+    : 'Cyfrowy Oddech – timer pracy i przerw online';
+}, [seconds, isActive, isBreak]);
 
   const unlockAudio = useCallback(async () => {
     try {
@@ -112,7 +112,7 @@ function App() {
     }
   }, []);
 
-  const playSound = useCallback(async (type = 'main', vol = 0.4) => {
+  const playSound = useCallback(async (type = 'main', vol = 0.6) => {
     if (!soundEnabled) return;
 
     try {
@@ -182,7 +182,7 @@ function App() {
     const newTask = BREAK_TASKS[Math.floor(Math.random() * BREAK_TASKS.length)];
     setCurrentTask(newTask);
 
-    await playSound('main', 0.5);
+    await playSound('main', 0.6);
     await triggerNotification("Czas na przerwę! 🌿", `Zadanie: ${newTask.text}`);
   }, [playSound, triggerNotification]);
 
@@ -194,7 +194,7 @@ function App() {
     timerEndRef.current = Date.now() + workTime * 1000;
     lastWholeSecondRef.current = workTime;
 
-    await playSound('main', 0.5);
+    await playSound('main', 0.6);
     await triggerNotification("Przerwa zakończona", "Wracamy do pracy! Skupienie włączone.");
   }, [playSound, triggerNotification, workTime]);
 
@@ -242,7 +242,7 @@ function App() {
       }
 
       if (isBreak && typeof prev === 'number' && prev > 3 && remaining <= 3 && remaining > 0) {
-        await playSound('breakEnd', 0.3);
+        await playSound('breakEnd', 0.5);
       }
 
       lastWholeSecondRef.current = remaining;
