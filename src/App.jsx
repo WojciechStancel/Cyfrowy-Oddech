@@ -38,8 +38,8 @@ const SOUND_URL = "/notification-sound.mp3";
 const NOTIFICATION_SOUND_URL = "/break-end-sound.mp3";
 
 function App() {
-  const [workTime, setWorkTime] = useState(1 * 5);
-  const [breakTime, setBreakTime] = useState(1 * 6);
+  const [workTime, setWorkTime] = useState(20 * 60);
+  const [breakTime, setBreakTime] = useState(3* 60);
 
   const [seconds, setSeconds] = useState(workTime);
   const [progress, setProgress] = useState(0);
