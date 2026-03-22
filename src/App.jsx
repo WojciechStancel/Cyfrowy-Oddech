@@ -42,17 +42,23 @@ function App() {
   const [breakTime, setBreakTime] = useState(1 * 6);
 
   const [seconds, setSeconds] = useState(workTime);
+  const [progress, setProgress] = useState(0);
   const [isActive, setIsActive] = useState(false);
   const [isBreak, setIsBreak] = useState(false);
   const [currentTask, setCurrentTask] = useState(null);
   const [completedSessions, setCompletedSessions] = useState(0);
   const [isWaitingForConfirmation, setIsWaitingForConfirmation] = useState(false);
+  const [customMinutes, setCustomMinutes] = useState('');
 
-  const [totalWorkMinutes, setTotalWorkMinutes] = useState(() => JSON.parse(localStorage.getItem('totalWorkMinutes')) || 0);
+  const [totalWorkSeconds, setTotalWorkSeconds] = useState(() => {
+    return JSON.parse(localStorage.getItem('totalWorkSeconds')) || 0;
+  });
+
   const [soundEnabled, setSoundEnabled] = useState(() => {
     const saved = localStorage.getItem('soundEnabled');
     return saved !== null ? JSON.parse(saved) : true;
   });
+
   const [notificationsEnabled, setNotificationsEnabled] = useState(() => {
     const saved = localStorage.getItem('notificationsEnabled');
     return saved !== null ? JSON.parse(saved) : false;
@@ -61,7 +67,6 @@ function App() {
   const timerEndRef = useRef(null);
   const intervalRef = useRef(null);
   const reminderRef = useRef(null);
-  const unlockedRef = useRef(false);
   const lastWholeSecondRef = useRef(null);
 
   const mainAudioRef = useRef(null);
@@ -76,8 +81,8 @@ function App() {
   }, [notificationsEnabled]);
 
   useEffect(() => {
-    localStorage.setItem('totalWorkMinutes', JSON.stringify(totalWorkMinutes));
-  }, [totalWorkMinutes]);
+    localStorage.setItem('totalWorkSeconds', JSON.stringify(totalWorkSeconds));
+  }, [totalWorkSeconds]);
 
   useEffect(() => {
     document.title = isActive
@@ -91,19 +96,17 @@ function App() {
         mainAudioRef.current = new Audio(SOUND_URL);
         mainAudioRef.current.preload = 'auto';
       }
+
       if (!breakEndAudioRef.current) {
         breakEndAudioRef.current = new Audio(NOTIFICATION_SOUND_URL);
         breakEndAudioRef.current.preload = 'auto';
       }
 
-      // "Dotyk" audio po geście użytkownika
       mainAudioRef.current.muted = true;
       await mainAudioRef.current.play();
       mainAudioRef.current.pause();
       mainAudioRef.current.currentTime = 0;
       mainAudioRef.current.muted = false;
-
-      unlockedRef.current = true;
     } catch (e) {
       console.warn('Audio unlock failed:', e);
     }
@@ -157,9 +160,24 @@ function App() {
     }
   }, [notificationsEnabled]);
 
+  const startTimer = useCallback((durationInSeconds) => {
+    timerEndRef.current = Date.now() + durationInSeconds * 1000;
+    lastWholeSecondRef.current = durationInSeconds;
+    setSeconds(durationInSeconds);
+    setProgress(0);
+    setIsActive(true);
+  }, []);
+
+  const stopTimer = useCallback(() => {
+    setIsActive(false);
+    timerEndRef.current = null;
+    lastWholeSecondRef.current = null;
+  }, []);
+
   const finishWork = useCallback(async () => {
     setIsActive(false);
     setIsWaitingForConfirmation(true);
+    setProgress(100);
 
     const newTask = BREAK_TASKS[Math.floor(Math.random() * BREAK_TASKS.length)];
     setCurrentTask(newTask);
@@ -171,6 +189,7 @@ function App() {
   const finishBreak = useCallback(async () => {
     setIsBreak(false);
     setSeconds(workTime);
+    setProgress(0);
     setIsActive(true);
     timerEndRef.current = Date.now() + workTime * 1000;
     lastWholeSecondRef.current = workTime;
@@ -179,25 +198,14 @@ function App() {
     await triggerNotification("Przerwa zakończona", "Wracamy do pracy! Skupienie włączone.");
   }, [playSound, triggerNotification, workTime]);
 
-  const startTimer = useCallback((durationInSeconds) => {
-    timerEndRef.current = Date.now() + durationInSeconds * 1000;
-    lastWholeSecondRef.current = durationInSeconds;
-    setSeconds(durationInSeconds);
-    setIsActive(true);
-  }, []);
-
-  const stopTimer = useCallback(() => {
-    setIsActive(false);
-    timerEndRef.current = null;
-    lastWholeSecondRef.current = null;
-  }, []);
-
   const setPreset = (w, b) => {
     if (!w || w <= 0) return;
+
     stopTimer();
     setWorkTime(w);
     setBreakTime(b);
     setSeconds(w);
+    setProgress(0);
     setIsBreak(false);
     setIsWaitingForConfirmation(false);
   };
@@ -206,6 +214,7 @@ function App() {
     setIsWaitingForConfirmation(false);
     setIsBreak(true);
     setCompletedSessions(prev => prev + 1);
+    setProgress(0);
     startTimer(breakTime);
   };
 
@@ -218,16 +227,21 @@ function App() {
     clearInterval(intervalRef.current);
 
     intervalRef.current = setInterval(async () => {
-      const remaining = Math.max(0, Math.ceil((timerEndRef.current - Date.now()) / 1000));
+      const totalDuration = isBreak ? breakTime : workTime;
+      const msLeft = Math.max(0, timerEndRef.current - Date.now());
+      const remaining = Math.ceil(msLeft / 1000);
+      const nextProgress = ((totalDuration * 1000 - msLeft) / (totalDuration * 1000)) * 100;
+
       const prev = lastWholeSecondRef.current;
 
+      setProgress(Math.min(100, Math.max(0, nextProgress)));
       setSeconds(remaining);
 
       if (!isBreak && typeof prev === 'number' && prev > remaining) {
-        setTotalWorkMinutes(current => current + (prev - remaining) / 60);
+        setTotalWorkSeconds(current => current + (prev - remaining));
       }
 
-      if (isBreak && prev > 3 && remaining <= 3 && remaining > 0) {
+      if (isBreak && typeof prev === 'number' && prev > 3 && remaining <= 3 && remaining > 0) {
         await playSound('breakEnd', 0.3);
       }
 
@@ -236,6 +250,7 @@ function App() {
       if (remaining === 0) {
         clearInterval(intervalRef.current);
         timerEndRef.current = null;
+        setProgress(100);
 
         if (isBreak) {
           await finishBreak();
@@ -243,22 +258,27 @@ function App() {
           await finishWork();
         }
       }
-    }, 250);
+    }, 100);
 
     return () => clearInterval(intervalRef.current);
-  }, [isActive, isBreak, finishBreak, finishWork, playSound]);
+  }, [isActive, isBreak, breakTime, workTime, finishBreak, finishWork, playSound]);
 
   useEffect(() => {
     const onVisibilityChange = () => {
       if (!document.hidden && isActive && timerEndRef.current) {
-        const remaining = Math.max(0, Math.ceil((timerEndRef.current - Date.now()) / 1000));
+        const totalDuration = isBreak ? breakTime : workTime;
+        const msLeft = Math.max(0, timerEndRef.current - Date.now());
+        const remaining = Math.ceil(msLeft / 1000);
+        const nextProgress = ((totalDuration * 1000 - msLeft) / (totalDuration * 1000)) * 100;
+
         setSeconds(remaining);
+        setProgress(Math.min(100, Math.max(0, nextProgress)));
       }
     };
 
     document.addEventListener('visibilitychange', onVisibilityChange);
     return () => document.removeEventListener('visibilitychange', onVisibilityChange);
-  }, [isActive]);
+  }, [isActive, isBreak, breakTime, workTime]);
 
   useEffect(() => {
     clearInterval(reminderRef.current);
@@ -303,11 +323,14 @@ function App() {
   const handleReset = () => {
     stopTimer();
     setSeconds(workTime);
+    setProgress(0);
     setIsBreak(false);
     setIsWaitingForConfirmation(false);
   };
 
-  const progress = (((isBreak ? breakTime : workTime) - seconds) / (isBreak ? breakTime : workTime)) * 100;
+  const estimatedBreakMinutes = customMinutes && Number(customMinutes) > 0
+    ? Math.max(1, Math.floor(Number(customMinutes) * 0.15))
+    : 0;
 
   return (
     <div className={`min-h-[100dvh] flex flex-col items-center justify-between py-6 px-6 transition-all duration-1000 font-sans relative overflow-hidden ${isBreak ? 'bg-emerald-700 text-white' : 'bg-slate-950 text-slate-100'}`}>
@@ -315,6 +338,7 @@ function App() {
         <button onClick={() => setSoundEnabled(!soundEnabled)} className="p-3 hover:bg-white/10 rounded-full transition-all">
           {soundEnabled ? <Volume2 size={24} /> : <VolumeX size={24} className="opacity-50" />}
         </button>
+
         <button onClick={toggleNotifications} className={`p-3 hover:bg-white/10 rounded-full transition-all ${notificationsEnabled ? 'text-emerald-400' : 'text-slate-500'}`}>
           {notificationsEnabled ? <Bell size={24} /> : <BellOff size={24} />}
         </button>
@@ -323,13 +347,25 @@ function App() {
       <div className="w-full max-w-4xl z-20 flex flex-col justify-center min-h-[140px]">
         {!isActive && !isBreak && !isWaitingForConfirmation && (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 animate-in fade-in zoom-in duration-500">
-            <button onClick={() => setPreset(25 * 60, 4 * 60)} className="p-4 rounded-[2rem] bg-slate-900/40 backdrop-blur-xl border border-white/5 hover:border-emerald-500/50 transition-all text-left">
+            <button
+              onClick={() => {
+                setCustomMinutes('');
+                setPreset(25 * 60, 4 * 60);
+              }}
+              className="p-4 rounded-[2rem] bg-slate-900/40 backdrop-blur-xl border border-white/5 hover:border-emerald-500/50 transition-all text-left"
+            >
               <div className="text-[9px] uppercase tracking-[0.2em] opacity-40 mb-1">Standard</div>
               <div className="text-2xl font-light text-white">25 <span className="text-[10px] opacity-30">min</span></div>
               <div className="mt-1 text-[8px] text-emerald-400 font-bold uppercase tracking-widest">Przerwa: 4m</div>
             </button>
 
-            <button onClick={() => setPreset(50 * 60, 7 * 60)} className="p-4 rounded-[2rem] bg-slate-900/40 backdrop-blur-xl border border-white/5 hover:border-emerald-500/50 transition-all text-left">
+            <button
+              onClick={() => {
+                setCustomMinutes('');
+                setPreset(50 * 60, 7 * 60);
+              }}
+              className="p-4 rounded-[2rem] bg-slate-900/40 backdrop-blur-xl border border-white/5 hover:border-emerald-500/50 transition-all text-left"
+            >
               <div className="text-[9px] uppercase tracking-[0.2em] opacity-40 mb-1">Długi</div>
               <div className="text-2xl font-light text-white">50 <span className="text-[10px] opacity-30">min</span></div>
               <div className="mt-1 text-[8px] text-emerald-400 font-bold uppercase tracking-widest">Przerwa: 7m</div>
@@ -337,21 +373,35 @@ function App() {
 
             <div className="p-4 rounded-[2rem] bg-slate-900/60 backdrop-blur-xl border border-emerald-500/30 flex flex-col items-center justify-center relative">
               <div className="text-[9px] uppercase tracking-[0.2em] text-emerald-400 font-bold mb-1">Własny</div>
+
               <div className="flex items-baseline justify-center w-full">
                 <input
                   type="number"
                   inputMode="numeric"
                   min="0"
                   placeholder="0"
+                  value={customMinutes}
                   className="bg-transparent w-full text-3xl font-light text-center outline-none text-white placeholder:opacity-20 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   onChange={(e) => {
-                    const val = Math.max(0, parseInt(e.target.value) || 0);
+                    const raw = e.target.value;
+                    setCustomMinutes(raw);
+
+                    const val = Math.max(0, parseInt(raw) || 0);
                     const breakMins = Math.max(1, Math.floor(val * 0.15));
-                    setPreset(val * 60, breakMins * 60);
+
+                    if (val > 0) {
+                      setPreset(val * 60, breakMins * 60);
+                    }
                   }}
                 />
                 <span className="text-[9px] opacity-30 uppercase font-bold ml-1">min</span>
               </div>
+
+              {estimatedBreakMinutes > 0 && (
+                <div className="mt-1 text-[8px] text-emerald-400 font-bold uppercase tracking-widest">
+                  Przerwa: {estimatedBreakMinutes}m
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -367,7 +417,10 @@ function App() {
         </div>
 
         <div className="w-full h-1 bg-white/10 mb-8 rounded-full overflow-hidden">
-          <div className="h-full bg-emerald-400 transition-all duration-300 ease-linear" style={{ width: `${progress}%` }} />
+          <div
+            className="h-full bg-emerald-400 transition-none"
+            style={{ width: `${progress}%` }}
+          />
         </div>
 
         {isBreak && currentTask && (
@@ -380,7 +433,10 @@ function App() {
 
       <div className="w-full max-w-md flex flex-col items-center gap-6 z-10">
         <div className="flex flex-col items-center gap-6">
-          <button onClick={handleStartPause} className={`w-20 h-20 rounded-full flex items-center justify-center transition-all ${isActive ? 'bg-white/10 border border-white/20' : 'bg-white text-slate-900'}`}>
+          <button
+            onClick={handleStartPause}
+            className={`w-20 h-20 rounded-full flex items-center justify-center transition-all ${isActive ? 'bg-white/10 border border-white/20' : 'bg-white text-slate-900'}`}
+          >
             {isActive ? <Pause size={32} /> : <Play size={32} className="ml-1" />}
           </button>
 
@@ -395,7 +451,7 @@ function App() {
 
         <div className="w-full grid grid-cols-2 opacity-40 text-center border-t border-white/5 pt-6">
           <div>
-            <div className="text-xl font-light">{Math.floor(totalWorkMinutes)}</div>
+            <div className="text-xl font-light">{Math.floor(totalWorkSeconds / 60)}</div>
             <div className="text-[8px] uppercase">Minut Dziś</div>
           </div>
           <div>
@@ -409,12 +465,18 @@ function App() {
         <div className="fixed inset-0 z-[100] bg-slate-950/95 backdrop-blur-xl flex flex-col items-center justify-center p-6 text-center">
           <div className="max-w-xs animate-in slide-in-from-bottom-8">
             <h2 className="text-4xl font-bold mb-6 text-white leading-tight">Zasłużyłeś na przerwę!</h2>
-            <button onClick={startBreak} className="w-full bg-emerald-500 py-6 rounded-2xl text-xl font-bold transition-all active:scale-95">
+
+            <button
+              onClick={startBreak}
+              className="w-full bg-emerald-500 py-6 rounded-2xl text-xl font-bold transition-all active:scale-95"
+            >
               Zacznij przerwę 🌿
             </button>
+
             <button
               onClick={() => {
                 setIsWaitingForConfirmation(false);
+                setProgress(0);
                 startTimer(2 * 60);
               }}
               className="mt-8 text-[10px] opacity-30 hover:opacity-100 uppercase tracking-[0.2em] transition-all"
